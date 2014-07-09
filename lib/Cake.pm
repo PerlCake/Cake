@@ -1,0 +1,609 @@
+package Cake;
+use strict;
+use warnings;
+use utf8;
+use Carp;
+use File::Find;
+use File::Spec;
+use Encode;
+use Data::Dumper;
+use base qw/Exporter/;
+use FindBin qw($Bin);
+use Cake::Helpers;
+
+our @EXPORT = qw(loadControllers plugins bake get post any model models around_match);
+my $cake = bless {}, __PACKAGE__;
+sub new { return $cake }
+
+#===============================================================================
+# import
+#===============================================================================
+sub import {
+    my ($class, @options) = @_;
+    my ($package,$script) = caller;
+    my @caller = caller;
+    my $engine;
+    
+    ###import these to app by default
+    strict->import;
+    warnings->import;
+    utf8->import;
+    
+    if (!$cake->{app}){
+        $cake->{app} = {};
+        $cake->{app}->{'basename'} = $script;
+        ( $cake->{app}->{'dir'} = $INC{$package} || $Bin) =~ s/\.pm//;
+        push @INC, $cake->{app}->{'dir'};
+        $cake->{app} = bless $cake->{app}, $package;
+    }
+    
+    $class->export_to_level(1, $class, @EXPORT);
+}
+
+#==============================================================================
+# around_match
+#==============================================================================
+my $next_around = 0;
+my @around_match = (sub{
+    shift;
+    my $c = shift;
+    print Dumper "maching routes";
+    $c->match();
+});
+
+sub _run_around_match {
+    my $self = shift;
+    my $next = $around_match[$next_around];
+    $next_around++;
+    $next->('_run_around_match',$self,@_);
+}
+
+sub _reset_around_match { $next_around = 0 }
+
+sub around_match {
+    my $sub = shift;
+    croak "around_match accepts a code ref only" if ref $sub ne 'CODE';
+    unshift @around_match, $sub;
+}
+
+#==============================================================================
+# plugins loader
+#==============================================================================
+my $plugins = {};
+sub plugins {
+    my @plugins = ref $_[0] eq 'ARRAY' ? @{$_[0]} : @_;
+    while (@plugins){
+        my $plugin = shift @plugins;
+        my $settings = {};
+        my $blessed;
+        if (ref $plugin){
+            die 'wrong plugin decleration';
+        }
+        
+        if (ref $plugins[0]){
+            $settings = shift @plugins;
+        }
+        
+        eval "use $plugin; 1;" or croak $@;
+        if ( $plugin->can('new') ){
+            $plugin->new($settings);
+        }
+        unshift @Cake::ISA,$plugin;
+        $plugins->{$plugin} = $settings;
+    }
+}
+
+sub config { $plugins }
+#==============================================================================
+# models loader
+#==============================================================================
+my $models = {};
+sub models {
+    my @models = ref $_[0] eq 'ARRAY' ? @{$_[0]} : @_;
+    while (@models){
+        my $model = shift @models;
+        my $settings = {};
+        my $blessed;
+        if (ref $model){
+            croak 'wrong model decleration';
+        }
+        
+        if (ref $models[0]){
+            $settings = shift @models;
+        }
+        
+        eval "use $model; 1;" or croak $@;
+        if ( $model->can('new') ){
+            $blessed = $model->new($settings);
+        } else {
+            $blessed = bless $settings, $model;
+        }
+        $models->{$model} = $blessed;
+    }
+}
+
+sub model {
+    my $model = shift;
+    $model = $cake->{app}->{'basename'} . '::Model::' . $model;
+    my $settings = $_[0] || {};
+    if ( !$models->{$model} ){
+        #didn't register it yet, go ahead
+        models [$model => $settings];
+    } else {
+        if ($_[0] && $model->can('new')){
+            return $model->new($settings);
+        }
+    }
+    return $models->{$model};
+}
+
+#============================================================================
+# load controllers
+#============================================================================
+our $controllers_dir;
+sub loadControllers {
+    my $dir = shift || 'Controllers';
+    $controllers_dir = $dir;
+    $dir = File::Spec->rel2abs( $dir, ref $cake->app ) ;
+    warn "loading Controllers From " . $dir;
+    if (!-d $dir){
+        warn "Can't find " . $dir . "\nContollers will not be loaded";
+        return;
+    }
+    
+    find(sub {
+        if ($_ =~ m/\.pm$/){
+            my $file = $File::Find::name;
+            eval "require '$file'";
+            if ($@) {
+                die("can't load controller $file");
+            }
+        }
+    }, $dir);
+}
+
+#==============================================================================
+# routes
+#==============================================================================
+sub any    { Cake::Routes::set('ANY'   , @_) }
+sub get    { Cake::Routes::set('GET'   , @_) }
+sub post   { Cake::Routes::set('POST'  , @_) }
+sub head   { Cake::Routes::set('HEAD'  , @_) }
+sub put    { Cake::Routes::set('PUT'   , @_) }
+sub delete { Cake::Routes::set('DELETE', @_) }
+
+#== short cuts =================================================================
+sub app    { shift->{app}      }
+sub req    { shift->{request}  }
+sub res    { shift->{response} }
+sub env    { shift->{request}  }
+
+#==============================================================================
+# bake the cake
+#==============================================================================
+sub bake {
+    my $class = shift;
+    my $env = shift || \%ENV;
+    $cake->{request} = 'Cake::Request'->new($env);
+    $cake->{response} = 'Cake::Response'->new({});
+    _reset_around_match();
+    return $cake->_run();
+}
+
+#==============================================================================
+# bake the cake
+#==============================================================================
+sub _run {
+    my $self = shift;
+    _run_around_match($self);
+    if (my $match = $self->{match}){
+        $match->{code}->($match->{bless},$self);
+    } else {
+        #no match
+    }
+    _reset_around_match();
+    return $self->finalize();
+}
+
+sub match  {
+    Cake::Routes::match(@_);
+}
+
+sub finalize {
+    my $self = shift;
+    my $return = shift;
+    my $status_code = $self->{response}->{status} || '200';
+    my $content_type = $self->{response}->{content}
+        || [ 'Content-Type' => 'text/plain' ];
+    my $body = $self->{response}->{body} || [''];
+    return [$status_code, $content_type, $body];
+}
+
+sub status {
+    my $self = shift;
+}
+
+sub content {
+    my $self = shift;
+}
+
+sub body {
+    my $self = shift;
+    my $body = shift;
+    $self->res->{body} = [$body];
+}
+
+#==============================================================================
+# Helpers
+#==============================================================================
+sub to_json {
+    my $self = shift;
+    my $data = shift;
+    return Cake::JSON::convert_to_json($data);
+}
+
+sub splat {
+    my $c = shift;
+    if (@_ > 0) {
+        return $c->{match}->{splat}->[$_[0]];
+    }
+    return $c->{match}->{splat};
+}
+
+sub capture {
+    my $c = shift;
+    if (@_ > 0) {
+        return $c->{match}->{capture}->{$_[0]};
+    }
+    return $c->{match}->{capture};
+}
+
+sub to_perl {
+    my $self = shift;
+    my $json_string = shift;
+    return Cake::JSON::convert_to_perl($json_string);
+}
+
+sub path {
+    if (@_ > 1){
+        $_[0]->env->{PATH_INFO} = $_[1];
+        return $_[0];
+    }
+    return $_[0]->env->{PATH_INFO} || '/';
+}
+
+sub method {
+    if (@_ > 1){
+        $_[0]->env->{REQUEST_METHOD} = $_[1];
+    }
+    return lc ($_[0]->env->{REQUEST_METHOD} || '');
+}
+
+sub is_secure {
+    return $_[0]->env->{'SSL_PROTOCOL'} ? 1 : 0;
+}
+
+#==============================================================================
+# Request Package
+#==============================================================================
+package Cake::Request; {
+    our $AUTOLOAD;
+    sub new {
+        my ($class,$env) = @_;
+        bless $env, $class;
+    }
+    
+    sub ip       { shift->{ REMOTE_ADDR    } }
+    sub host     { shift->{ HTTP_HOST      } }
+    sub method   { shift->{ REQUEST_METHOD } }
+    sub referrer { shift->{ HTTP_REFERER   } }
+    sub path     { shift->{ PATH_INFO      } }
+    
+    sub params {
+        
+    }
+    
+    sub AUTOLOAD {
+        my $self = shift;
+        my $sub = $AUTOLOAD;
+        $sub =~ s/.*:://;
+        $sub = 'HTTP_' . uc $sub;
+        return $self->{$sub};
+    }
+}
+
+#==============================================================================
+# Response Package
+#==============================================================================
+package Cake::Response; {
+    use strict;
+    use warnings;
+    sub new {
+        my ($class,$options) = @_;
+        bless $options, $class;
+    }
+}
+
+#==============================================================================
+# Routes Package
+#==============================================================================
+package Cake::Routes; {
+    use strict;
+    use Data::Dumper;
+    use warnings;
+    my $ROUTES = {};
+    my $CALLER = {};
+    my $FASTMATCH = {};
+    my @SORTED;
+    my %r = ( num => '(\d+)' );
+    sub set {
+        my ($type, $path, $code) = @_;
+        
+        my @caller = caller(1);
+        my $class = $caller[0];
+        
+        my @paths = split '/', $path;
+        my (@newPath,@capture,$new);
+        
+        if ($paths[0] ne '' && ref $path ne 'Regexp') {
+            my $class_path = $class;
+            my $c_dir = lc($Cake::controllers_dir) . "::";
+            $class_path =~ s/(.*)\Q$c_dir//ig;
+            $class_path =~ s/::/\//g;
+            unshift @paths, ('', lc $class_path);
+        }
+        
+        if (ref $path eq 'Regexp' || $path =~ /:/g) {
+            my $specifity = 0;
+            if (ref $path eq 'Regexp') {
+                push @newPath, $path; goto SKIP;
+            }
+            
+            foreach my $p (@paths){
+                if ( $p =~ /^:{(.*?)}/) {
+                    $p = $r{$1}; push @capture, '__SPLAT__';
+                } elsif ($p =~ m/^:\[(.*?)\]/){
+                    push @capture, $1;
+                    $p = '([^\/\.\?]+)';
+                } elsif ($p =~ m/^:(\(.*?\))/){
+                    $p = $1; push @capture, '__SPLAT__';
+                } else { $specifity++ } #direct paths with higher order
+                push @newPath, $p;
+            }
+            
+            SKIP :{1};
+            my $newPath = join '/', @newPath;
+            my $len = scalar @paths;
+            $FASTMATCH->{$len} ||= {max => 0};
+            $FASTMATCH->{$len}->{$specifity} ||= [];
+            if ($specifity > $FASTMATCH->{$len}->{max}) {
+                $FASTMATCH->{$len}->{max} = $specifity;
+            }
+            
+            ##create a unique id for this regex path
+            $path = ":MATCH:$len:" . "$specifity:" .
+                @{$FASTMATCH->{$len}->{$specifity}};
+            
+            push @{$FASTMATCH->{$len}->{$specifity}},
+                [qr{$newPath}, \@capture, $path];
+            
+        } else {
+            $path = join '/', @paths;
+        }
+        
+        $ROUTES->{$path} = {};
+        if (!$CALLER->{$class}) {
+            if ($class->can('new')) {
+                $new = $class->new();
+            } else {
+                $new = bless {}, $class;
+            }
+            $CALLER->{$class} = $new;
+        }
+        
+        $ROUTES->{$path}->{$type} = {
+            code => $code,
+            class => $caller[0],
+            file => $caller[1],
+            line => $caller[2],
+            path => $path,
+            bless => $CALLER->{$class},
+            splat => [],
+            capture => {}
+        };
+    }
+    
+    ## 1 - direct matches first
+    ## 2- mix of regex and direct match
+    
+    ## ex: /path/hi/:name & /path/:name/:name2
+    ## when matching /path/hi/mamod should match
+    ## /path/hi/:name
+    
+    ##3- specifity /path/:name/:name2 & /path/:(.*?)
+    ## /path/mamod/mehyar should match /path/:name/:name2
+    sub match {
+        my $c       = shift;
+        my $request = $c->req;
+        my $path    = $request->path;
+        my $method  = $request->method;
+        $c->{match} = undef; #undef previous match
+        my $match;
+        ##direct match / fast case
+        if ($ROUTES->{$path} && ($match = $ROUTES->{$path}->{$method}) ){
+            $c->{match} = $match;
+        } else {
+            #sort only once
+            if (!@SORTED) {
+                @SORTED = reverse (sort keys %$FASTMATCH);
+            }
+            
+            foreach my $i (@SORTED){
+                my $routes = $FASTMATCH->{$i} || next;
+                for (my $x = $routes->{max}; $x >= 0; $x--){
+                    my $route = $routes->{$x} || next;
+                    foreach my $regex (@{$route}){
+                        my $rex = $regex->[0];
+                        my @captures;
+                        next unless (@captures = ($path =~ m/$rex$/));
+                        my $path  = $regex->[2];
+                        if ($ROUTES->{$path}
+                                && ($match = $ROUTES->{$path}->{$method}) ){
+                            
+                            my $splat = $regex->[1];
+                            _match_regex($c,$match, \@captures, $splat);
+                            return;
+                        }
+                    }
+                }
+            };
+        }
+        return;
+    }
+    
+    sub _match_regex {
+        my ($c, $match, $captures, $splat) = @_;
+        my %captured;
+        my @splats;
+        for (0 .. @{$splat}-1){
+            if ($splat->[$_] ne '__SPLAT__') {
+                $captured{$splat->[$_]} = $captures->[$_];
+            } else {
+                push @splats,  $captures->[$_];
+            }
+        }
+        
+        if (!@$splat) {
+            @splats = @$captures;
+        }
+        
+        $match->{capture} = \%captured;
+        $match->{splat} = \@splats;
+        $c->{match} = $match;
+        return;
+    }
+    
+    sub inspect { $ROUTES }
+}
+
+#==============================================================================
+# I18n Package
+#==============================================================================
+
+
+#==============================================================================
+# JSON serilization
+# this is a very slow hack, we will try to use JSON::XS & JSON if available
+#==============================================================================
+package Cake::JSON; {
+    use strict;
+    use warnings;
+    our ($json_xs,$json_pp);
+    $json_xs = eval "use JSON::XS; 1;";
+    if (!$json_xs) {
+        $json_pp = eval "use JSON; 1;";
+    }
+    
+    sub convert_to_json {
+        my $perl_object = shift;
+        if ($json_xs) {
+            return JSON::XS::encode_json($perl_object);
+        } elsif ($json_pp){
+            return JSON::encode_json($perl_object);
+        }
+        
+        my $trim = 1;
+        my $dumper = Data::Dumper->new([ _stringify($perl_object,'encode') ]);
+        $dumper->Purity(1)->Terse(1)->Indent(1)->Deparse(1)->Pair(' : ');
+        my $json = $dumper->Dump;
+        $json =~ s/(?:'((.*?)[^\\'])?')/$1 ? '"'.$1.'"' : '""'/ge;
+        $json =~ s/\\'/'/g;
+        $json =~ s/\\\\/\\/g;
+        $json =~ s/(\\x\{(.*?)\})/chr(hex($2))/ge;
+        if ($trim){
+            $json =~ s/\n//g;
+            $json =~ s/\s+//g;
+        }
+        return $json;
+    }
+    
+    sub convert_to_perl {
+        my $data = shift;
+        if ($json_xs) {
+            return JSON::XS::decode_json($data);
+        } elsif ($json_pp){
+            return JSON::decode_json($data);
+        }
+        
+        #remove comments
+        $data =~ s/\n+\s+/\n/g;
+        $data =~ s/[\n\s+]\/\*.*?\*\/|[\n\s+]\/\/.*?\n/\n/gs;
+        if ($data){
+            $data =~ s/(["'])(?:\s?)+:/$1=>/g;
+            $data =~ s/[^\\]([\@\$].*?\s*)/ \\$1/g;
+        }
+        
+        my $str = eval "$data";
+        die "invalid json" if $@;
+        return $str;
+        #return _stringify($data);
+    }
+    
+    sub _stringify {
+        my $hash = shift;
+        my $type = shift || 'decode';
+        my $action = {
+            decode => \&_decode_string,
+            encode => \&_encode_string,
+        };
+        
+        if (!ref $hash){
+            return $action->{$type}($hash);
+        }
+        
+        my $newhash = {};
+        my $array = 0;
+        my $loop;
+        
+        if (ref $hash eq 'ARRAY') {
+            $loop->{array} = $hash;
+            $array = 1;
+        } else {
+            $loop = $hash
+        }
+        
+        while (my ($key,$value) = each (%{$loop}) ) {
+            if (ref $value eq 'HASH'){
+                $newhash->{$key} = _stringify($value,$type);
+            } elsif (ref $value eq 'ARRAY'){
+                push @{$newhash->{$key}}, map { _stringify($_,$type) } @{$value};
+            } else {
+                $newhash->{$key} = $action->{$type}->($value);
+            }
+        }
+        return !$array ? $newhash : $newhash->{array};
+    }
+    
+    sub _encode_string {
+        my $str = shift;
+        return 0 if $str && $str =~ /^\d$/ && $str == 0;
+        return '' if !$str;
+        my @search = ('\\', "\n", "\t", "\r", "\b", "\f", '"');
+        my @replace = ('\\\\', '\\n', '\\t', '\\r', '\\b', '\\f', '\"');
+        map { $str =~ s/\Q$search[$_]/$replace[$_]/g } (0..$#search);
+        return $str;
+    }
+    
+    sub _decode_string {
+        my $str = shift;
+        return '' if !$str;
+        my @search = ('\\\\', '\\n', '\\t', '\\r', '\\b', '\\f', '\"');
+        my @replace = ('\\', "\n", "\t", "\r", "\b", "\f", '"');
+        map { $str =~ s/\Q$search[$_]/$replace[$_]/ } (0..$#search);
+        return $str;
+    }
+}
+
+1;
+
+__END__
