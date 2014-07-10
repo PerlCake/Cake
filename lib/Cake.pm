@@ -26,20 +26,16 @@ our @EXPORT = qw(loadControllers plugins bake get post any model models around_m
 my $cake = bless {}, __PACKAGE__;
 sub new { return $cake }
 
-#===============================================================================
+#==============================================================================
 # import
-#===============================================================================
+#==============================================================================
 sub import {
     my ($class, @options) = @_;
     my ($package,$script) = caller;
-    my @caller = caller;
-    my $engine;
-    
     ###import these to app by default
     strict->import;
     warnings->import;
     utf8->import;
-    
     if (!$cake->{app}){
         $cake->{app} = {};
         $cake->{app}->{'basename'} = $script;
@@ -47,7 +43,6 @@ sub import {
         push @INC, $cake->{app}->{'dir'};
         $cake->{app} = bless $cake->{app}, $package;
     }
-    
     $class->export_to_level(1, $class, @EXPORT);
 }
 
@@ -69,13 +64,13 @@ sub _run_around_match {
     $next->('_run_around_match',$self,@_);
 }
 
-sub _reset_around_match { $next_around = 0 }
-
 sub around_match {
     my $sub = shift;
     croak "around_match accepts a code ref only" if ref $sub ne 'CODE';
     unshift @around_match, $sub;
 }
+
+sub _reset_around_match { $next_around = 0 }
 
 #==============================================================================
 # plugins loader
@@ -105,6 +100,7 @@ sub plugins {
 }
 
 sub config { $plugins }
+
 #==============================================================================
 # models loader
 #==============================================================================
@@ -146,9 +142,9 @@ sub model {
     return $models->{$model};
 }
 
-#============================================================================
+#==============================================================================
 # load controllers
-#============================================================================
+#==============================================================================
 our $controllers_dir;
 sub loadControllers {
     my $dir = shift || 'Controllers';
