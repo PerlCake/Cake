@@ -492,10 +492,8 @@ package Cake::Routes; {
     ##3- specifity /path/:name/:name2 & /path/:(.*?)
     ## /path/mamod/mehyar should match /path/:name/:name2
     
-    #$FASTMATCH = {
-    #    '# of paths' => { 'specifity' => [route1,route2,...] }
-    #}
-    
+    #FASTMATCH = {
+    #    'number of paths' => { 'specifity' => [route1,route2,...] } }
     
     sub match {
         my $c       = shift;
@@ -675,3 +673,6 @@ package Cake::JSON; {
 1;
 
 __END__
+
+
+
