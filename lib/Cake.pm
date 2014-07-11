@@ -9,7 +9,6 @@ use Encode;
 use Data::Dumper;
 use base qw/Exporter/;
 use FindBin qw($Bin);
-
 our $VERSION = 0.001;
 
 my $HTTPRequest  = eval q{
@@ -22,21 +21,29 @@ my $HTTPResponse = eval q{
     'Plack::Response';
 } || 'Cake::Response';
 
+my $isCGI = $ENV{GATEWAY_INTERFACE} && $ENV{GATEWAY_INTERFACE} eq 'CGI/1.1';
+
+if ($isCGI) {
+    $HTTPResponse = 'Cake::Response';
+    $HTTPRequest  = 'Cake::Request';
+}
+
 our @EXPORT = qw(loadControllers plugins bake get post any model models around_match);
 my $cake = bless {}, __PACKAGE__;
 sub new { return $cake }
+sub log {}
 
 #==============================================================================
 # import
 #==============================================================================
 sub import {
     my ($class, @options) = @_;
-    my ($package,$script) = caller;
     ###import these to app by default
     strict->import;
     warnings->import;
     utf8->import;
     if (!$cake->{app}){
+        my ($package,$script) = caller;
         $cake->{app} = {};
         $cake->{app}->{'basename'} = $script;
         ( $cake->{app}->{'dir'} = $INC{$package} || $Bin) =~ s/\.pm//;
@@ -49,18 +56,17 @@ sub import {
 #==============================================================================
 # around_match
 #==============================================================================
-my $next_around = 0;
+my $next_around_match = 0;
 my @around_match = (sub{
     shift;
     my $c = shift;
-    print Dumper "maching routes";
     $c->match();
 });
 
 sub _run_around_match {
     my $self = shift;
-    my $next = $around_match[$next_around];
-    $next_around++;
+    my $next = $around_match[$next_around_match];
+    $next_around_match++;
     $next->('_run_around_match',$self,@_);
 }
 
@@ -70,7 +76,7 @@ sub around_match {
     unshift @around_match, $sub;
 }
 
-sub _reset_around_match { $next_around = 0 }
+sub _reset_around_match { $next_around_match = 0 }
 
 #==============================================================================
 # plugins loader
@@ -180,7 +186,7 @@ sub match  { Cake::Routes::match(@_)         }
 sub app    { shift->{app}      }
 sub req    { shift->{request}  }
 sub res    { shift->{response} }
-sub env    { shift->{request}  }
+sub env    { shift->{request}->env  }
 
 #==============================================================================
 # bake the cake
@@ -190,6 +196,9 @@ sub bake {
     my $env = shift || \%ENV;
     $cake->{request}  =  $HTTPRequest->new($env);
     $cake->{response} =  $HTTPResponse->new();
+    if ($cake->{app}->{start}) {
+        $cake->{app}->{start}->($cake);
+    }
     _reset_around_match();
     return $cake->_run();
 }
@@ -215,10 +224,6 @@ sub finalize {
         $c->res->status(200);
     }
     return $c->res->finalize();
-}
-
-sub content {
-    my $self = shift;
 }
 
 #==============================================================================
@@ -252,12 +257,6 @@ sub to_perl {
     return Cake::JSON::convert_to_perl($json_string);
 }
 
-
-
-sub is_secure {
-    return $_[0]->env->{'SSL_PROTOCOL'} ? 1 : 0;
-}
-
 #== Response methods ==========================================================
 sub redirect       {  shift->res->redirect(@_)       }
 sub body           {  shift->res->body(@_)           }
@@ -266,11 +265,28 @@ sub headers        {  shift->res->headers(@_)        }
 sub status         {  shift->res->status(@_)         }
 sub content_type   {  shift->res->content_type(@_)   }
 sub content_length {  shift->res->content_length(@_) }
+
+my %epoch = (s => 1, m => 60, h => 60 * 60,
+             d => 60 * 60 * 24, M => 60 * 60 * 24 * 30,
+             y => 60 * 60 * 24 * 30 * 12);
+
 sub cookies {
     my $self = shift;
     my $name = shift;
     if (@_){
         my $value = shift;
+        #convert strings to epoch time as Plack::Response
+        #doesn't support string format in cookies
+        if ($HTTPResponse eq 'Plack::Response' && ref $value eq 'HASH') {
+            if ($value->{expires}) {
+                my $expire = $value->{expires};
+                if ($expire =~ s/^\+//) {
+                    my ($t,$e) = ($expire =~ /(\d+)(\w)/);
+                    my $epoch = $epoch{$e} || (60 * 60 * 24);
+                    $value->{expires} = time + $t * $epoch;
+                }
+            }
+        }
         $self->res->cookies->{$name} = $value;
         return;
     } elsif ($name){
@@ -283,6 +299,91 @@ sub cookies {
 sub path    {  shift->req->path(@_)    }
 sub method  {  shift->req->method()    }
 sub param   {  shift->req->param(@_)   }
+sub params   {  shift->req->params     }
+
+#== uri methods ===============================================================
+sub uri_encode {
+    return '' if !defined $_[0];
+    $_[0] =~ s/([^A-Za-z0-9])/sprintf("%%%02X", ord($1))/seg;
+    return $_[0];
+}
+
+sub uri_decode {
+    $_[0] =~ tr/+/ /;
+    $_[0] =~ s/\%([A-Fa-f0-9]{2})/pack('C', hex($1))/seg;
+    return $_[0];
+}
+
+#==============================================================================
+# uri_for
+#==============================================================================
+sub uri_for {
+    my $self = shift;
+    return $self->_get_full_url(@_);
+}
+
+#==============================================================================
+# return current url with path & parameters
+# we can add new params to the requested URL
+#==============================================================================
+sub uri_with {
+    my $self = shift;
+    my $params = $self->params;
+    return $self->_get_full_url(@_,$params);
+}
+
+#=============================================================================
+# get current full url
+#=============================================================================
+sub is_secure {
+    return $_[0]->env->{'SSL_PROTOCOL'} ? 1 : 0;
+}
+
+sub uri_base {
+    my $self = shift;
+    my $base = 'http';
+    $base .='s' if $self->is_secure();
+    $base .= '://'.$self->env->{HTTP_HOST};
+    return $base;
+}
+
+sub _get_full_url {
+    my $self = shift;
+    my @params;
+    my $url = $self->uri_base;
+    my $top_level = 0;
+    my $script = $self->env->{SCRIPT_NAME};
+    if ($self->env->{REQUEST_URI} =~ m/^$script/){
+        $url .= $script;
+    }
+    
+    foreach my $uri (@_){
+        if (!ref $uri) {
+            if ($uri =~ /^http/) {
+                die "http $uri must be first argument" if $top_level;
+                $url = $uri;
+            } else {
+                if ($top_level == 0 && $uri !~ /^\//) {
+                    $url .= $self->path . '/';
+                } elsif ($top_level && $uri !~ /^\//){
+                    $url .= '/';
+                }
+                $url .= $uri;
+            }
+            $top_level = 1;
+        } elsif (ref $uri eq 'HASH'){
+            while (my ($key,$value) = each(%{$uri})) {
+                push(@params,$key.'='.uri_encode($value));
+            }
+        }
+    }
+    
+    if (@params) {
+        my $params = join('&',@params);
+        $url .= '?'.$params;
+    }
+    return $url;
+}
 
 #==============================================================================
 # Request Package
@@ -343,9 +444,8 @@ package Cake::Request; {
         return $self->{cookies};
     }
     
-    sub param {
-        shift->cgi->param(@_);
-    }
+    sub param { shift->cgi->param(@_) }
+    sub params { shift->cgi->Vars }
 }
 
 #==============================================================================
@@ -354,22 +454,44 @@ package Cake::Request; {
 package Cake::Response; {
     use strict;
     use warnings;
-    use CGI;
+    use CGI (); use CGI::Cookie;
     sub new {
         my ($class,$options) = @_;
-        bless $options, $class;
+        bless {
+            content_type => 'text/html',
+            status_code => 200,
+            cookies => {},
+            headers => [],
+            cgi => CGI->new
+        }, $class;
+    }
+    
+    sub body {
+        my $self = shift;
+        my $body = shift;
+        my $content = '';
+        if (ref $body eq 'ARRAY') {
+            
+        } else {
+            $content = $body;
+        }
+        $self->{body} = $content;
     }
     
     sub cookies {
         my $self = shift;
+        my $name = shift;
+        return $self->{cookies};
     }
     
     sub redirect {
         my $self = shift;
+        $self->{redirect} = \@_;
     }
     
     sub content_type {
         my $self = shift;
+        $self->{content_type} = shift;
     }
     
     sub headers {
@@ -378,14 +500,61 @@ package Cake::Response; {
     
     sub header {
         my $self = shift;
+        die "usage : header( 'Name' => 'content' )" if @_ != 2;
+        push @{$self->{headers}},@_;
     }
     
     sub status {
         my $self = shift;
+        $self->{status_code} = shift;
     }
     
     sub finalize {
         my $self = shift;
+        ##finalize cookies
+        my $cookies = $self->_finalize_cookies;
+        my $content_length = $self->_get_content_length;
+        print $self->{cgi}->header(
+            -Content_length => $content_length,
+            -type => $self->{content_type},
+            -status => $self->{status_code},
+            -cookie => $cookies,
+            @{$self->{headers}}
+        );
+        print $self->{body};
+    }
+    
+    sub _get_content_length {
+        my $self = shift;
+        if (defined $self->{content_length}) {
+            return $self->{content_length};
+        }
+        return length $self->{body};
+    }
+    
+    sub _finalize_cookies {
+        my $self = shift;
+        my $cookies = $self->{cookies};
+        my @cookies;
+        for (keys %{$cookies}){
+            my $key = $_;
+            my $value = $cookies->{$key};
+            my %cookie = ( -name => $key ); 
+            if (ref $value eq 'HASH') {
+                for (keys %{$value}){
+                    $cookie{$_} = $value->{$_};
+                }
+            } else {
+                $cookie{-value} = $value;
+            }
+            push @cookies, $self->{cgi}->cookie(%cookie);
+        }
+        return \@cookies;
+    }
+    
+    sub content_length {
+        my $self = shift;
+        $self->{content_length} = shift;
     }
 }
 
@@ -403,13 +572,10 @@ package Cake::Routes; {
     my %r = ( num => '(\d+)' );
     sub set {
         my ($type, $path, $code) = @_;
-        
         my @caller = caller(1);
         my $class = $caller[0];
-        
         my @paths = split '/', $path;
         my (@newPath,@capture,$new);
-        
         if ($paths[0] ne '' && ref $path ne 'Regexp') {
             my $class_path = $class;
             my $c_dir = lc($Cake::controllers_dir) . "::";
@@ -510,7 +676,7 @@ package Cake::Routes; {
                 my $routes = $FASTMATCH->{$i} || next;
                 ##now for specifity, meaning start to match path with
                 ##less regex first, /test/foo/(.*?) should match
-                ##before /(.*?)/(.*?)
+                ##before /(.*?)/(.*?) if path is /test/foo/something
                 for (my $x = $routes->{max}; $x >= 0; $x--){
                     my $route = $routes->{$x} || next;
                     foreach my $regex (@{$route}){
@@ -670,5 +836,11 @@ package Cake::JSON; {
 
 __END__
 
+=head1 NAME
 
+Cake - a piece of cake micro framework
 
+=head1 DESCRIPTION
+
+PerlCake is a minimal/Micro web framework that runs under both environments
+PSGI & CGI
