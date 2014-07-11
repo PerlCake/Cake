@@ -196,9 +196,6 @@ sub bake {
     my $env = shift || \%ENV;
     $cake->{request}  =  $HTTPRequest->new($env);
     $cake->{response} =  $HTTPResponse->new();
-    if ($cake->{app}->{start}) {
-        $cake->{app}->{start}->($cake);
-    }
     _reset_around_match();
     return $cake->_run();
 }
