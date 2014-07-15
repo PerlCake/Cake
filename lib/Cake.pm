@@ -90,9 +90,7 @@ sub plugins {
         my $blessed;
         if (ref $plugin){
             die 'wrong plugin decleration';
-        }
-        
-        if (ref $plugins[0]){
+        } elsif (ref $plugins[0]){
             $settings = shift @plugins;
         }
         
@@ -287,7 +285,8 @@ sub cookies {
         $self->res->cookies->{$name} = $value;
         return;
     } elsif ($name){
-        return $self->req->cookies()->{$name};
+        my $cookies = $self->req->cookies() || {};
+        return $cookies->{$name};
     }
     return return $self->req->cookies();
 }
@@ -454,7 +453,7 @@ package Cake::Response; {
     use CGI (); use CGI::Cookie;
     sub new {
         my ($class,$options) = @_;
-        bless {
+        return bless {
             content_type => 'text/html',
             status_code => 200,
             cookies => {},
