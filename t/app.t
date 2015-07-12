@@ -1,5 +1,5 @@
 BEGIN {
-    $ENV{CAKE_CGI} = 1;
+    $ENV{CAKE_CGI} = 0;
 }
 
 use Plack::Builder;
