@@ -1,16 +1,28 @@
 use 5.010001;
 use ExtUtils::MakeMaker;
 
-# See lib/ExtUtils/MakeMaker.pm for details of how to influence
-# the contents of the Makefile that is written.
 WriteMakefile(
-    NAME => 'Cake',
-    VERSION_FROM => 'lib/Cake.pm', # finds $VERSION
-    #EXE_FILES => ['script/cake'],
-    PREREQ_PM => {
-#'YAML::Tiny' => 0
+    NAME              => 'Cake',
+    VERSION_FROM      => 'lib/Cake.pm',
+    ABSTRACT_FROM  => 'lib/Cake.pm',
+    EXE_FILES    => ['script/perlcake'],
+    PREREQ_PM         => {
+        
     },
-    ($] >= 5.005 ? ## Add these new keywords supported since 5.005
-      (ABSTRACT_FROM => 'lib/Cake.pm', # retrieve abstract from module
-       AUTHOR => 'Mamod A. Mehyar <mamod.mehyar@gmail.com>') : ())
+    LICENSE        => 'perl',
+    AUTHOR         => 'Mamod Mehyar <mamod.mehyar@gmail.com>',
+    "TEST_REQUIRES" => {
+        'CGI::Compile' => 0,
+        'CGI::Emulate::PSGI' => 0,
+        'HTTP::Request::Common' => 0,
+        'Plack' => 0,
+        'Plack::Test' => 0,
+        'Plack::App::WrapCGI' => 0
+    },
+    META_MERGE => {
+        resources => {
+            repository => 'git://github.com/PerlCake/Cake.git',
+            bugtracker => 'https://github.com/PerlCake/Cake/issues',
+        }
+    }
 );

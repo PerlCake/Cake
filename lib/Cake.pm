@@ -9,7 +9,7 @@ use Encode;
 use Data::Dumper;
 use base qw/Exporter/;
 use FindBin qw($Bin);
-our $VERSION = 0.001;
+our $VERSION = '0.0.1';
 
 my $HTTPRequest  = eval q{
     use Plack::Request;
@@ -21,17 +21,27 @@ my $HTTPResponse = eval q{
     'Plack::Response';
 } || 'Cake::Response';
 
-my $isCGI = $ENV{GATEWAY_INTERFACE} && $ENV{GATEWAY_INTERFACE} eq 'CGI/1.1';
+my $isCGI = ($ENV{GATEWAY_INTERFACE} && 
+             $ENV{GATEWAY_INTERFACE} eq 'CGI/1.1') || $ENV{CAKE_CGI};
 
 if ($isCGI) {
     $HTTPResponse = 'Cake::Response';
     $HTTPRequest  = 'Cake::Request';
+    $SIG{__DIE__} = sub {
+        my $q = new CGI;
+        print $q->header( "text/html" );
+        print $_[0];
+        return;
+    };
 }
 
-our @EXPORT = qw(loadControllers plugins bake get post any model models around_match);
+our @EXPORT = qw(loadControllers Settings Plugins 
+                  bake get post del put any model around_match 
+                  register_function);
+
 my $cake = bless {}, __PACKAGE__;
 sub new { return $cake }
-sub log {}
+sub debug { warn $_[0]; }
 
 #==============================================================================
 # import
@@ -50,7 +60,12 @@ sub import {
         push @INC, $cake->{app}->{'dir'};
         $cake->{app} = bless $cake->{app}, $package;
     }
-    $class->export_to_level(1, $class, @EXPORT);
+
+    if ($options[0] && $options[0] eq 'plugin'){
+        $class->export_to_level(1, $class, ('register_function'));
+    } else {
+        $class->export_to_level(1, $class, @EXPORT);
+    }
 }
 
 #==============================================================================
@@ -82,7 +97,7 @@ sub _reset_around_match { $next_around_match = 0 }
 # plugins loader
 #==============================================================================
 my $plugins = {};
-sub plugins {
+sub Plugins {
     my @plugins = ref $_[0] eq 'ARRAY' ? @{$_[0]} : @_;
     while (@plugins){
         my $plugin = shift @plugins;
@@ -96,11 +111,16 @@ sub plugins {
         
         eval "use $plugin; 1;" or croak $@;
         if ( $plugin->can('new') ){
-            $plugin->new($settings);
+            $settings = $plugin->new($settings);
         }
-        unshift @Cake::ISA,$plugin;
         $plugins->{$plugin} = $settings;
     }
+}
+
+sub plugin {
+    my $self = shift;
+    my $name = shift;
+    return $plugins->{$name};
 }
 
 sub config { $plugins }
@@ -109,41 +129,56 @@ sub config { $plugins }
 # models loader
 #==============================================================================
 my $models = {};
-sub models {
-    my @models = ref $_[0] eq 'ARRAY' ? @{$_[0]} : @_;
-    while (@models){
-        my $model = shift @models;
-        my $settings = {};
-        my $blessed;
-        if (ref $model){
-            croak 'wrong model decleration';
-        } elsif (ref $models[0]){
-            $settings = shift @models;
-        }
-        
-        eval "use $model; 1;" or croak $@;
-        if ( $model->can('new') ){
-            $blessed = $model->new($settings);
-        } else {
-            $blessed = bless $settings, $model;
-        }
-        $models->{$model} = $blessed;
-    }
-}
-
 sub model {
+    my $self = shift;
     my $model = shift;
-    $model = $cake->{app}->{'basename'} . '::Model::' . $model;
+    $model = ref($self->{app}) . '::Model::' . $model;
     my $settings = $_[0] || {};
     if ( !$models->{$model} ){
-        #didn't register it yet, go ahead
-        models [$model => $settings];
-    } else {
-        if ($_[0] && $model->can('new')){
-            return $model->new($settings);
+        eval "use $model; 1;" or croak $@;
+        if ( $model->can('init') ){
+            $models->{$model} = $model->init($self);
+        } else {
+            $models->{$model} = bless {}, $model;
         }
     }
     return $models->{$model};
+}
+
+#==============================================================================
+# register global function
+#==============================================================================
+sub register_function {
+    my $name = shift;
+    my $func = shift;
+    if (Cake->can($name)){
+        croak "function with '$name' name alread exists";
+    }
+    {
+        no strict 'refs';
+        my $sub = "Cake::" . $name;
+        *$name = $func;
+    }
+}
+
+#==============================================================================
+# global settings
+#==============================================================================
+sub Settings {
+    my $settings = shift;
+    if (ref $settings eq 'HASH') {
+        $cake->{settings} = $settings;
+    }
+    return $cake->{settings};
+}
+
+sub settings {
+    my $self = shift;
+    my $key = shift;
+    if (defined $key){
+        return $self->{settings}->{$key};
+    }
+    return $self->{settings};
 }
 
 #==============================================================================
@@ -152,39 +187,80 @@ sub model {
 our $controllers_dir;
 sub loadControllers {
     my $dir = shift || 'Controllers';
-    $controllers_dir = $dir;
-    $dir = File::Spec->rel2abs( $dir, ref $cake->app ) ;
-    warn "loading Controllers From " . $dir;
-    if (!-d $dir){
-        warn "Can't find " . $dir . "\nContollers will not be loaded";
+    my $appBase;
+
+    if (ref $dir eq 'ARRAY'){
+        foreach my $c (@{$dir}) {
+            next if !defined $c;
+            loadControllers($c);
+        }
         return;
     }
+
+    ($appBase = $cake->app->{basename}) =~ s/\.pm//;
+
+    $controllers_dir = $dir;
+    $dir = File::Spec->catdir( $appBase, $dir );
+    debug "loading Controllers From " . $dir;
     
+    #is it a single file or folder?
+    if (-f $dir){
+        eval "require '$dir'";
+        if ($@) {
+            die("can't load controller $dir" . $@);
+        }
+        return;
+    } elsif (!-d $dir){
+        debug "Can't find " . $dir . "\nContollers will not be loaded";
+        return;
+    }
+
+    my @controllers;
     find(sub {
         if ($_ =~ m/\.pm$/){
             my $file = $File::Find::name;
-            eval "require '$file'";
-            if ($@) {
-                die("can't load controller $file");
-            }
+            push @controllers, $file;
         }
     }, $dir);
+
+    for (@controllers){
+        eval "require '$_'";
+        if ($@) {
+            croak ("can't load controller $_");
+        }
+    }
 }
 
 #== routes ====================================================================
-sub any    { Cake::Routes::set('ANY'   , @_) }
+sub any {
+    my @routes = ('get', 'post', 'del', 'put', 'head');
+    if (ref $_[0] eq 'ARRAY'){
+        @routes = @{ shift @_ };
+    }
+
+    my @caller = caller(0);
+
+    {
+        no strict 'refs';
+        for (@routes){
+            my $sub = "Cake::" . $_;
+            $sub->(@_, \@caller);
+        }
+    }
+}
+
 sub get    { Cake::Routes::set('GET'   , @_) }
 sub post   { Cake::Routes::set('POST'  , @_) }
 sub head   { Cake::Routes::set('HEAD'  , @_) }
 sub put    { Cake::Routes::set('PUT'   , @_) }
-sub delete { Cake::Routes::set('DELETE', @_) }
+sub del    { Cake::Routes::set('DELETE', @_) }
 sub match  { Cake::Routes::match(@_)         }
 
 #== short cuts ================================================================
-sub app    { shift->{app}      }
-sub req    { shift->{request}  }
-sub res    { shift->{response} }
-sub env    { shift->{request}->env  }
+sub app    {  shift->{app}           }
+sub req    {  shift->{request}       }
+sub res    {  shift->{response}      }
+sub env    {  shift->{request}->env  }
 
 #==============================================================================
 # bake the cake
@@ -203,6 +279,9 @@ sub bake {
 #==============================================================================
 sub _run {
     my $self = shift;
+
+    ##reset previous matched routes
+    $self->{match} = undef;
     _run_around_match($self);
     if (my $match = $self->{match}){
         $match->{code}->($match->{bless},$self);
@@ -218,6 +297,11 @@ sub finalize {
     if (!$c->res->status) {
         $c->res->status(200);
     }
+
+    if (!$c->res->content_type ){
+        $c->res->content_type('text/html');
+    }
+
     return $c->res->finalize();
 }
 
@@ -228,6 +312,12 @@ sub to_json {
     my $self = shift;
     my $data = shift;
     return Cake::JSON::convert_to_json($data);
+}
+
+sub to_perl {
+    my $self = shift;
+    my $json_string = shift;
+    return Cake::JSON::convert_to_perl($json_string);
 }
 
 sub splat {
@@ -246,24 +336,33 @@ sub capture {
     return $c->{match}->{capture};
 }
 
-sub to_perl {
-    my $self = shift;
-    my $json_string = shift;
-    return Cake::JSON::convert_to_perl($json_string);
-}
+
+sub routes { Cake::Routes->inspect }
 
 #== Response methods ==========================================================
-sub redirect       {  shift->res->redirect(@_)       }
-sub body           {  shift->res->body(@_)           }
-sub header         {  shift->res->header(@_)         }
-sub headers        {  shift->res->headers(@_)        }
-sub status         {  shift->res->status(@_)         }
-sub content_type   {  shift->res->content_type(@_)   }
-sub content_length {  shift->res->content_length(@_) }
+sub dump           {  shift->res->body( Dumper $_[0]) }
+sub redirect       {  shift->res->redirect(@_)        }
+sub body           {  shift->res->body(@_)            }
+sub header         {  shift->res->header(@_)          }
+sub headers        {  shift->res->headers(@_)         }
+sub status         {  shift->res->status(@_)          }
+sub content_type   {  shift->res->content_type(@_)    }
+sub content_length {  shift->res->content_length(@_)  }
+sub dumper {
+    my $self = shift;
+    return if $isCGI;
+    print Dumper $_[0];
+}
 
-my %epoch = (s => 1, m => 60, h => 60 * 60,
-             d => 60 * 60 * 24, M => 60 * 60 * 24 * 30,
-             y => 60 * 60 * 24 * 30 * 12);
+sub render {
+    my $self = shift;
+    my $string = shift;
+    my $args = shift || {};
+    $args->{c} = $self;
+    my $temp = Cake::Template::compile($string);
+    my $body = $temp->($args);
+    $self->body($body);
+}
 
 sub cookies {
     my $self = shift;
@@ -274,12 +373,7 @@ sub cookies {
         #doesn't support string format in cookies
         if ($HTTPResponse eq 'Plack::Response' && ref $value eq 'HASH') {
             if ($value->{expires}) {
-                my $expire = $value->{expires};
-                if ($expire =~ s/^\+//) {
-                    my ($t,$e) = ($expire =~ /(\d+)(\w)/);
-                    my $epoch = $epoch{$e} || (60 * 60 * 24);
-                    $value->{expires} = time + $t * $epoch;
-                }
+                $value->{expires} = Cake::Util::toepoch($value->{expires});
             }
         }
         $self->res->cookies->{$name} = $value;
@@ -288,27 +382,14 @@ sub cookies {
         my $cookies = $self->req->cookies() || {};
         return $cookies->{$name};
     }
-    return return $self->req->cookies();
+    return $self->req->cookies();
 }
 
 #== Request methods ===========================================================
-sub path    {  shift->req->path(@_)    }
-sub method  {  shift->req->method()    }
-sub param   {  shift->req->param(@_)   }
-sub params   {  shift->req->params     }
-
-#== uri methods ===============================================================
-sub uri_encode {
-    return '' if !defined $_[0];
-    $_[0] =~ s/([^A-Za-z0-9])/sprintf("%%%02X", ord($1))/seg;
-    return $_[0];
-}
-
-sub uri_decode {
-    $_[0] =~ tr/+/ /;
-    $_[0] =~ s/\%([A-Fa-f0-9]{2})/pack('C', hex($1))/seg;
-    return $_[0];
-}
+sub path    {  shift->req->path(@_)        }
+sub method  {  shift->req->method()        }
+sub param   {  shift->req->param(@_)       }
+sub params  {  shift->req->body_parameters }
 
 #==============================================================================
 # uri_for
@@ -369,7 +450,7 @@ sub _get_full_url {
             $top_level = 1;
         } elsif (ref $uri eq 'HASH'){
             while (my ($key,$value) = each(%{$uri})) {
-                push(@params,$key.'='.uri_encode($value));
+                push(@params,$key.'='.Cake::Util::uri_encode($value));
             }
         }
     }
@@ -408,8 +489,8 @@ package Cake::Request; {
         }, $class;
     }
     
-    sub env {$_[0]->{env}}
-    sub cgi {$_[0]->{cgi}}
+    sub env { $_[0]->{env} }
+    sub cgi { $_[0]->{cgi} }
     
     sub address     { $_[0]->env->{REMOTE_ADDR} }
     sub remote_host { $_[0]->env->{REMOTE_HOST} }
@@ -442,6 +523,7 @@ package Cake::Request; {
     
     sub param { shift->cgi->param(@_) }
     sub params { shift->cgi->Vars }
+    sub parameters { shift->cgi }
 }
 
 #==============================================================================
@@ -482,12 +564,18 @@ package Cake::Response; {
     
     sub redirect {
         my $self = shift;
+        my $where = shift;
+        $self->res->status(301);
+        $self->header(Location => $where);
         $self->{redirect} = \@_;
     }
     
     sub content_type {
         my $self = shift;
-        $self->{content_type} = shift;
+        if (@_){
+            $self->{content_type} = shift;
+        }
+        return $self->{content_type};
     }
     
     sub headers {
@@ -502,7 +590,10 @@ package Cake::Response; {
     
     sub status {
         my $self = shift;
-        $self->{status_code} = shift;
+        if (my $status = shift){
+            $self->{status_code} = $status;
+        }
+        return $self->{status_code};
     }
     
     sub finalize {
@@ -550,7 +641,10 @@ package Cake::Response; {
     
     sub content_length {
         my $self = shift;
-        $self->{content_length} = shift;
+        if (@_){
+            $self->{content_length} = shift;
+        }
+        return $self->{content_length};
     }
 }
 
@@ -567,12 +661,16 @@ package Cake::Routes; {
     my @SORTED;
     my %r = ( num => '(\d+)' );
     sub set {
-        my ($type, $path, $code) = @_;
-        my @caller = caller(1);
+        my ($type, $path, $code, $caller) = @_;
+        # print STDERR Dumper \@_;
+        my @caller = defined $caller ? @{$caller} : caller(1);
         my $class = $caller[0];
         my @paths = split '/', $path;
         my (@newPath,@capture,$new);
-        if ($paths[0] ne '' && ref $path ne 'Regexp') {
+        
+        if (!defined $paths[0]){
+            $paths[0] = '/';
+        } elsif ($paths[0] ne '' && ref $path ne 'Regexp') {
             my $class_path = $class;
             my $c_dir = lc($Cake::controllers_dir) . "::";
             $class_path =~ s/(.*)\Q$c_dir//ig;
@@ -598,7 +696,7 @@ package Cake::Routes; {
                 push @newPath, $p;
             }
             
-            SKIP :{1};
+            SKIP : {1};
             my $newPath = join '/', @newPath;
             my $len = scalar @paths;
             $FASTMATCH->{$len} ||= {max => 0};
@@ -618,16 +716,16 @@ package Cake::Routes; {
             $path = join '/', @paths;
         }
         
-        $ROUTES->{$path} = {};
+        $ROUTES->{$path} = {} if !$ROUTES->{$path};
         if (!$CALLER->{$class}) {
             if ($class->can('new')) {
-                $new = $class->new();
+                $new = $class->new($cake);
             } else {
                 $new = bless {}, $class;
             }
             $CALLER->{$class} = $new;
         }
-        
+
         $ROUTES->{$path}->{$type} = {
             code => $code,
             class => $caller[0],
@@ -643,11 +741,11 @@ package Cake::Routes; {
     ## 1 - direct matches first
     ## 2- mix of regex and direct match
     
-    ## ex: /path/hi/:name & /path/:name/:name2
+    ## ex: /path/hi/:name & /path/:[name]/:[name2]
     ## when matching /path/hi/mamod should match
-    ## /path/hi/:name
+    ## /path/hi/:[name]
     
-    ##3- specifity /path/:name/:name2 & /path/:(.*?)
+    ##3- specifity /path/:[name]/:[name2] & /path/:(.*?)
     ## /path/mamod/mehyar should match /path/:name/:name2
     
     #FASTMATCH = {
@@ -828,15 +926,140 @@ package Cake::JSON; {
     }
 }
 
+
+#==============================================================================
+# Cake Utils
+#==============================================================================
+package Cake::Util; {
+    my %epoch = (s => 1, m => 60, h => 60 * 60,
+             d => 60 * 60 * 24, M => 60 * 60 * 24 * 30,
+             y => 60 * 60 * 24 * 30 * 12);
+
+    sub toepoch {
+        my $time = shift;
+        if ($time =~ s/^\+//) {
+            my ($t,$e) = ($time =~ /(\d+)(\w)/);
+            my $epoch = $epoch{$e} || (60 * 60 * 24);
+            return (time + ($t * $epoch));
+        }
+
+        return time() + $time;
+    }
+    
+    sub uri_encode {
+        return '' if !defined $_[0];
+        $_[0] =~ s/([^A-Za-z0-9])/sprintf("%%%02X", ord($1))/seg;
+        return $_[0];
+    }
+
+    sub uri_decode {
+        $_[0] =~ tr/+/ /;
+        $_[0] =~ s/\%([A-Fa-f0-9]{2})/pack('C', hex($1))/seg;
+        return $_[0];
+    }
+}
+
 1;
 
 __END__
 
 =head1 NAME
 
-Cake - a piece of cake micro framework
+Cake - a piece of cake perl micro framework
 
 =head1 DESCRIPTION
 
 PerlCake is a minimal/Micro web framework that runs under both environments
-PSGI & CGI
+PSGI & CGI without any modification.
+
+=head1 SYNOPSIS
+
+    package App;
+    use Cake;
+
+    #load plugins
+    Plugins [
+        'App::Plugins::Something' => {
+            option1 => 'option1',
+            ...
+        }
+    ];
+
+    #global settings
+    Settings {
+        'setting1' => '...',
+        'setting2' => '...'
+    };
+
+    around_match sub {
+        my $next = shift;
+        my $c = shift;
+
+        if ($c->path eq '/admin'){
+            $c->body('admin area restricted');
+            return; #<-- will stop dispatching
+        };
+
+        #continue dispatching
+        $c->$next();
+    };
+
+    get '/hello' => sub {
+        my $self = shift;
+        my $c = shift;
+
+        $c->body('hello world');
+    };
+
+    1;
+
+=head1 Command
+
+Create application tree inside some folder
+
+    $ cd /some/path/app
+    $ perlcake -init App
+
+This will create the following app tree
+    
+    + app.psgi
+    + app.cgi
+    + lib/App.pm
+    + lib/App/Controllers
+    + lib/App/Model
+    + static
+
+=head1 Route Methods
+    
+    get '/' => sub {};
+    post '/' => sub{};
+    del '/' => sub {};
+    put '/' => sub {};
+    head '/' => sub {};
+    
+    any '/' => sub {};
+    any => ['post', 'get'] => sub {}; 
+
+=head1 Route Paths
+    
+    + '/'                  # absolute direct path
+    + '/something/:[name]' # capture second path as name
+    + '/:(.*?)'            # regex captured as first splat
+    + qr{.*?}              # regex
+
+When using routes from controllers you don't have to set absolute path and it will
+match against controller name space
+
+    package App::Controllers::Test
+
+    get '' => sub {};   #will match /test
+    get 'another' => sub {}; #will match /test/another
+    ...
+
+=head1 Routing Examples
+
+TODO
+
+=head1 TUTORIALS
+
+TODO

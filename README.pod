@@ -1,0 +1,100 @@
+=head1 NAME
+
+Cake - a piece of cake perl micro framework
+
+=head1 DESCRIPTION
+
+PerlCake is a minimal/Micro web framework that runs under both environments
+PSGI & CGI without any modification.
+
+=head1 SYNOPSIS
+
+    package App;
+    use Cake;
+
+    #load plugins
+    Plugins [
+        'App::Plugins::Something' => {
+            option1 => 'option1',
+            ...
+        }
+    ];
+
+    #global settings
+    Settings {
+        'setting1' => '...',
+        'setting2' => '...'
+    };
+
+    around_match sub {
+        my $next = shift;
+        my $c = shift;
+
+        if ($c->path eq '/admin'){
+            $c->body('admin area restricted');
+            return; #<-- will stop dispatching
+        };
+
+        #continue dispatching
+        $c->$next();
+    };
+
+    get '/hello' => sub {
+        my $self = shift;
+        my $c = shift;
+
+        $c->body('hello world');
+    };
+
+    1;
+
+=head1 Command
+
+Create application tree inside some folder
+
+    $ cd /some/path/app
+    $ perlcake -init App
+
+This will create the following app tree
+    
+    + app.psgi
+    + app.cgi
+    + lib/App.pm
+    + lib/App/Controllers
+    + lib/App/Model
+    + static
+
+=head1 Route Methods
+    
+    get '/' => sub {};
+    post '/' => sub{};
+    del '/' => sub {};
+    put '/' => sub {};
+    head '/' => sub {};
+    
+    any '/' => sub {};
+    any => ['post', 'get'] => sub {}; 
+
+=head1 Route Paths
+    
+    + '/'                  # absolute direct path
+    + '/something/:[name]' # capture second path as name
+    + '/:(.*?)'            # regex captured as first splat
+    + qr{.*?}              # regex
+
+When using routes from controllers you don't have to set absolute path and it will
+match against controller name space
+
+    package App::Controllers::Test
+
+    get '' => sub {};   #will match /test
+    get 'another' => sub {}; #will match /test/another
+    ...
+
+=head1 Routing Examples
+
+TODO
+
+=head1 TUTORIALS
+
+TODO

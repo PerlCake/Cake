@@ -1,0 +1,222 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+use File::Copy;
+use File::Path qw(make_path remove_tree);
+use File::Spec;
+use Data::Dumper;
+use Cwd;
+
+my ($help,$init,@parse);
+
+GetOptions(
+    "h|help"     => \$help,
+    "i|init"   => \$init,
+) or help();
+
+init() if $init;
+help() if $help;
+
+
+
+sub init {
+    my $app = $ARGV[0] || 'App';
+    print Dumper $app;
+    my @tree = split '::', $app;
+
+    unshift @tree, 'lib';
+
+    my $basedir = File::Spec->catdir(cwd(), @tree);
+    my $controllersdir = File::Spec->catdir(cwd(), @tree, 'Controllers');
+    my $pluginsdir = File::Spec->catdir(cwd(), @tree, 'Plugins');
+    my $modelsdir = File::Spec->catdir(cwd(), @tree, 'Model');
+
+    make_path($basedir);
+    make_path($controllersdir);
+    make_path($pluginsdir);
+    make_path($modelsdir);
+
+    my @_app = @tree;
+    my $file = pop @_app;
+    my $appFile = File::Spec->catdir(cwd(), @_app, $file . '.pm');
+    my $controllersFile = File::Spec->catdir($controllersdir, 'Hello.pm');
+    my $modelFile = File::Spec->catdir($modelsdir, 'DB.pm');
+    my $pluginFile = File::Spec->catdir($pluginsdir, 'Test.pm');
+
+    createPackage($appFile, $app);
+    createPackageController($controllersFile, $app);
+    createPackagePlugin($pluginFile, $app);
+    createPackageModel($modelFile, $app);
+
+    my $psgi = File::Spec->catdir(cwd(), 'app.psgi');
+    createPSGIFile($psgi, $app);
+
+    my $cgi = File::Spec->catdir(cwd(), 'app.cgi');
+    createCGIFile($cgi, $app);
+
+    print Dumper $modelFile;
+}
+
+sub help {
+
+}
+
+sub createPackage {
+    my $file = shift;
+    my $package = shift;
+
+    my $plugin = $package . '::Plugins::Test';
+
+    open my $fh, '>', $file;
+    print $fh qq~package $package
+use Cake;
+
+# global settings
+Settings {
+    'setting1' => {
+
+    }
+};
+
+Plugins [
+    '$plugin' => {
+        option => 'option'
+    }
+];
+
+loadControllers('Controllers');
+
+# You can define routes here too
+get '/home' => sub {
+    my \$self = shift;
+    my \$c = shift;
+    \$c->body('home');
+};
+
+1;
+~;
+
+close $fh;
+
+}
+
+sub createPackageController {
+    my $file = shift;
+    my $package = shift . '::Controllers::Hello;';
+    open my $fh, '>', $file;
+    print $fh qq~package $package
+use Cake;
+
+# define some routes
+# => will routes to get /hello/world
+get 'world' => sub {
+    my \$self = shift;
+    my \$c = shift;
+
+    \$c->body('Hello World');
+};
+
+1;
+~;
+    close $fh;
+}
+
+
+sub createPackagePlugin {
+    my $file = shift;
+    my $package = shift . '::Plugins::Test;';
+    open my $fh, '>', $file;
+    print $fh qq~package $package
+use Cake 'plugin';
+
+sub new {
+    my \$class= shift;
+    my \$options = shift; #options as defined when loading Plugins
+    my \$c = shift; #cake instance at third argument
+    return bless \$options, \$class;
+}
+
+# register function into cake namespace (be careful)
+# can be used any where like cake internal function
+# \$c->json_body({
+#   msg => 'Hello World'
+#});
+register_function 'json_body' => sub {
+    my \$c = shift;
+    my \$hash = shift;
+    my \$self = \$c->plugin(__PACKAGE__);
+    \$c->content_type('application/json');
+    my \$json = \$c->to_json(\$hash);
+    \$c->body(\$json);
+};
+
+1;
+~;
+    close $fh;
+}
+
+
+sub createPackageModel {
+    my $file = shift;
+    my $package = shift . '::Model::DB;';
+    open my $fh, '>', $file;
+    print $fh qq~package $package
+
+# init method will be called once on initialization
+# think of this as new
+sub init {
+    my \$class = shift;
+    my \$c = shift; #second argument is cake instance
+
+    return bless {
+        c => \$c
+    }, \$class;
+}
+
+# adding methods
+# can be called with cake model()
+# \$c->model('DB')->somemethod();
+sub somemethod {
+    my \$self = shift;
+}
+
+1;
+~;
+    close $fh;
+}
+
+
+sub createPSGIFile {
+    my $file = shift;
+    my $package = shift;
+
+    open my $fh, '>', $file;
+    print $fh qq~use Plack::Builder;
+use lib './lib';
+use $package;
+
+my \$app = sub {
+    my \$env = shift;
+    return $package->bake(\$env);
+};
+
+return builder {
+    enable "Plack::Middleware::Static", path => qr{^/static}, root => './';
+    \$app;
+};
+~;
+    close $fh;
+}
+
+sub createCGIFile {
+    my $file = shift;
+    my $package = shift;
+
+    open my $fh, '>', $file;
+    print $fh qq~use lib './lib';
+use $package;
+$package->bake();
+~;
+    close $fh;
+}
