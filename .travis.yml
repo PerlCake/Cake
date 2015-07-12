@@ -1,5 +1,11 @@
 language: perl
 perl:
-  - "5.8"
   - "5.10"
   - "5.18"
+install:
+  - "cpanm -n Plack"
+  - "cpanm -n CGI::Compile"
+  - "cpanm -n CGI::Emulate::PSGI"
+  - "cpanm -n HTTP::Request::Common"
+  - "cpanm -n Plack::Test"
+  - "cpanm -n Plack::App::WrapCGI"
