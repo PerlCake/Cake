@@ -163,9 +163,8 @@ sub createPackageModel {
     open my $fh, '>', $file;
     print $fh qq~package $package
 
-# init method will be called once on initialization
-# think of this as new
-sub init {
+# new method will be called once on initialization
+sub new {
     my \$class = shift;
     my \$c = shift; #second argument is cake instance
 
