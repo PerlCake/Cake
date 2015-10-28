@@ -40,7 +40,8 @@ our @EXPORT = qw(loadControllers Settings Plugins
                   register_function);
 
 my $cake = bless {}, __PACKAGE__;
-sub new { return $cake }
+
+sub new   { return $cake }
 sub debug { warn $_[0]; }
 
 #==============================================================================
@@ -136,8 +137,8 @@ sub model {
     my $settings = $_[0] || {};
     if ( !$models->{$model} ){
         eval "use $model; 1;" or croak $@;
-        if ( $model->can('init') ){
-            $models->{$model} = $model->init($self);
+        if ( $model->can('new') ){
+            $models->{$model} = $model->new($self);
         } else {
             $models->{$model} = bless {}, $model;
         }
@@ -450,14 +451,14 @@ sub _get_full_url {
             $top_level = 1;
         } elsif (ref $uri eq 'HASH'){
             while (my ($key,$value) = each(%{$uri})) {
-                push(@params,$key.'='.Cake::Util::uri_encode($value));
+                push(@params,$key . '=' . Cake::Util::uri_encode($value));
             }
         }
     }
     
     if (@params) {
         my $params = join('&',@params);
-        $url .= '?'.$params;
+        $url .= '?' . $params;
     }
     return $url;
 }
@@ -655,6 +656,7 @@ package Cake::Routes; {
     use strict;
     use Data::Dumper;
     use warnings;
+    
     my $ROUTES = {};
     my $CALLER = {};
     my $FASTMATCH = {};
