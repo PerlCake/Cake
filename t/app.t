@@ -16,7 +16,7 @@ use HTTP::Headers;
 use LWP::UserAgent;
 
 if ($ENV{CAKE_CGI}){
-    $app = Plack::App::WrapCGI->new(script => "./app.cgi")->to_app;
+    $app = Plack::App::WrapCGI->new(script => "./t/app.cgi")->to_app;
 } else {
     $app = sub {
         my $env = shift;
@@ -122,6 +122,13 @@ sub testPlugins {
     is $res->content, "From plugin value option1";
 }
 
+sub testModels {
+    my $cb = shift;
+    my $req = HTTP::Request->new(GET => "/some/model");
+    my $res = $cb->($req);
+    is $res->content, "Model Testing Success";
+}
+
 sub testGetCookies {
     my $cb = shift;
 
@@ -158,6 +165,7 @@ my @tests = (
     \&testRouteSpecifity,
     \&testFromController,
     \&testPlugins,
+    \&testModels,
     \&testSetCookies,
     \&testGetCookies
 );

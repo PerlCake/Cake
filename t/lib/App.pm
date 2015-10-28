@@ -58,6 +58,18 @@ get '/test' => sub {
     $c->body('Hello');
 };
 
+get '/some/model' => sub {
+    my $self = shift;
+    my $c = shift;
+    my $model = $c->model('Test');
+    my $message;
+
+    if (!ref $model){ $message = "Error Blessing Model Instance"  }
+    if ($model->{c} != $c){ $message = "Error Blessing Model Instance"  }
+
+    $message = $model->returnSuccessTest();
+    $c->body($message);
+};
 
 get '/getcookies' => sub {
     my $self = shift;
