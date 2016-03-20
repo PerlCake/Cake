@@ -21,7 +21,7 @@ my $HTTPResponse = eval q{
     'Plack::Response';
 } || 'Cake::Response';
 
-my $isCGI = ($ENV{GATEWAY_INTERFACE} && 
+my $isCGI = ($ENV{GATEWAY_INTERFACE} &&
              $ENV{GATEWAY_INTERFACE} eq 'CGI/1.1') || $ENV{CAKE_CGI};
 
 if ($isCGI) {
@@ -35,8 +35,8 @@ if ($isCGI) {
     };
 }
 
-our @EXPORT = qw(loadControllers Settings Plugins 
-                  bake get post del put any model around_match 
+our @EXPORT = qw(loadControllers Settings Plugins
+                  bake get post del put any model around_match
                   register_function);
 
 my $cake = bless {}, __PACKAGE__;
@@ -109,7 +109,7 @@ sub Plugins {
         } elsif (ref $plugins[0]){
             $settings = shift @plugins;
         }
-        
+
         eval "use $plugin; 1;" or croak $@;
         if ( $plugin->can('new') ){
             $settings = $plugin->new($settings);
@@ -203,7 +203,7 @@ sub loadControllers {
     $controllers_dir = $dir;
     $dir = File::Spec->catdir( $appBase, $dir );
     debug "loading Controllers From " . $dir;
-    
+
     #is it a single file or folder?
     if (-f $dir){
         eval "require '$dir'";
@@ -434,7 +434,7 @@ sub _get_full_url {
     if ($self->env->{REQUEST_URI} =~ m/^$script/){
         $url .= $script;
     }
-    
+
     foreach my $uri (@_){
         if (!ref $uri) {
             if ($uri =~ /^http/) {
@@ -455,7 +455,7 @@ sub _get_full_url {
             }
         }
     }
-    
+
     if (@params) {
         my $params = join('&',@params);
         $url .= '?' . $params;
@@ -483,16 +483,16 @@ package Cake::Request; {
         } else {
             $cgi = CGI->new;
         }
-        
+
         bless {
             env => $env,
             cgi => $cgi
         }, $class;
     }
-    
+
     sub env { $_[0]->{env} }
     sub cgi { $_[0]->{cgi} }
-    
+
     sub address     { $_[0]->env->{REMOTE_ADDR} }
     sub remote_host { $_[0]->env->{REMOTE_HOST} }
     sub protocol    { $_[0]->env->{SERVER_PROTOCOL} }
@@ -505,10 +505,10 @@ package Cake::Request; {
     sub script_name { $_[0]->env->{SCRIPT_NAME} }
     sub scheme      { $_[0]->env->{'psgi.url_scheme'} }
     sub secure      { $_[0]->scheme eq 'https' }
-    
+
     sub content_length   { $_[0]->env->{CONTENT_LENGTH} }
     sub content_type     { $_[0]->env->{CONTENT_TYPE} }
-    
+
     sub cookies {
         my $self = shift;
         my $name = shift;
@@ -521,7 +521,7 @@ package Cake::Request; {
         }
         return $self->{cookies};
     }
-    
+
     sub param { shift->cgi->param(@_) }
     sub params { shift->cgi->Vars }
     sub parameters { shift->cgi }
@@ -544,25 +544,25 @@ package Cake::Response; {
             cgi => CGI->new
         }, $class;
     }
-    
+
     sub body {
         my $self = shift;
         my $body = shift;
         my $content = '';
         if (ref $body eq 'ARRAY') {
-            
+
         } else {
             $content = $body;
         }
         $self->{body} = $content;
     }
-    
+
     sub cookies {
         my $self = shift;
         my $name = shift;
         return $self->{cookies};
     }
-    
+
     sub redirect {
         my $self = shift;
         my $where = shift;
@@ -570,7 +570,7 @@ package Cake::Response; {
         $self->header(Location => $where);
         $self->{redirect} = \@_;
     }
-    
+
     sub content_type {
         my $self = shift;
         if (@_){
@@ -578,17 +578,17 @@ package Cake::Response; {
         }
         return $self->{content_type};
     }
-    
+
     sub headers {
         my $self = shift;
     }
-    
+
     sub header {
         my $self = shift;
         die "usage : header( 'Name' => 'content' )" if @_ != 2;
         push @{$self->{headers}},@_;
     }
-    
+
     sub status {
         my $self = shift;
         if (my $status = shift){
@@ -596,7 +596,7 @@ package Cake::Response; {
         }
         return $self->{status_code};
     }
-    
+
     sub finalize {
         my $self = shift;
         ##finalize cookies
@@ -611,7 +611,7 @@ package Cake::Response; {
         );
         print $self->{body};
     }
-    
+
     sub _get_content_length {
         my $self = shift;
         if (defined $self->{content_length}) {
@@ -619,7 +619,7 @@ package Cake::Response; {
         }
         return length $self->{body};
     }
-    
+
     sub _finalize_cookies {
         my $self = shift;
         my $cookies = $self->{cookies};
@@ -627,7 +627,7 @@ package Cake::Response; {
         for (keys %{$cookies}){
             my $key = $_;
             my $value = $cookies->{$key};
-            my %cookie = ( -name => $key ); 
+            my %cookie = ( -name => $key );
             if (ref $value eq 'HASH') {
                 for (keys %{$value}){
                     $cookie{$_} = $value->{$_};
@@ -639,7 +639,7 @@ package Cake::Response; {
         }
         return \@cookies;
     }
-    
+
     sub content_length {
         my $self = shift;
         if (@_){
@@ -656,7 +656,7 @@ package Cake::Routes; {
     use strict;
     use Data::Dumper;
     use warnings;
-    
+
     my $ROUTES = {};
     my $CALLER = {};
     my $FASTMATCH = {};
@@ -669,7 +669,7 @@ package Cake::Routes; {
         my $class = $caller[0];
         my @paths = split '/', $path;
         my (@newPath,@capture,$new);
-        
+
         if (!defined $paths[0]){
             $paths[0] = '/';
         } elsif ($paths[0] ne '' && ref $path ne 'Regexp') {
@@ -679,13 +679,13 @@ package Cake::Routes; {
             $class_path =~ s/::/\//g;
             unshift @paths, ('', lc $class_path);
         }
-        
+
         if (ref $path eq 'Regexp' || $path =~ /:/g) {
             my $specifity = 0;
             if (ref $path eq 'Regexp') {
                 push @newPath, $path; goto SKIP;
             }
-            
+
             foreach my $p (@paths){
                 if ( $p =~ /^:{(.*?)}/) {
                     $p = $r{$1}; push @capture, '__SPLAT__';
@@ -697,7 +697,7 @@ package Cake::Routes; {
                 } else { $specifity++ } #direct paths with higher order
                 push @newPath, $p;
             }
-            
+
             SKIP : {1};
             my $newPath = join '/', @newPath;
             my $len = scalar @paths;
@@ -706,18 +706,18 @@ package Cake::Routes; {
             if ($specifity > $FASTMATCH->{$len}->{max}) {
                 $FASTMATCH->{$len}->{max} = $specifity;
             }
-            
+
             ##create a unique id for this regex path
             $path = ":MATCH:$len:" . "$specifity:" .
                 @{$FASTMATCH->{$len}->{$specifity}};
-            
+
             push @{$FASTMATCH->{$len}->{$specifity}},
                 [qr{$newPath}, \@capture, $path];
-            
+
         } else {
             $path = join '/', @paths;
         }
-        
+
         $ROUTES->{$path} = {} if !$ROUTES->{$path};
         if (!$CALLER->{$class}) {
             if ($class->can('new')) {
@@ -739,20 +739,20 @@ package Cake::Routes; {
             capture => {}
         };
     }
-    
+
     ## 1 - direct matches first
     ## 2- mix of regex and direct match
-    
+
     ## ex: /path/hi/:name & /path/:[name]/:[name2]
     ## when matching /path/hi/mamod should match
     ## /path/hi/:[name]
-    
+
     ##3- specifity /path/:[name]/:[name2] & /path/:(.*?)
     ## /path/mamod/mehyar should match /path/:name/:name2
-    
+
     #FASTMATCH = {
     #    'number of paths' => { 'specifity' => [route1,route2,...] } }
-    
+
     sub match {
         my $c       = shift;
         my $request = $c->req;
@@ -782,7 +782,7 @@ package Cake::Routes; {
                         my $path  = $regex->[2];
                         if ($ROUTES->{$path}
                                 && ($match = $ROUTES->{$path}->{$method}) ){
-                            
+
                             my $splat = $regex->[1];
                             _match_regex($c,$match, \@captures, $splat);
                             return;
@@ -793,7 +793,7 @@ package Cake::Routes; {
         }
         return;
     }
-    
+
     sub _match_regex {
         my ($c, $match, $captures, $splat) = @_;
         my %captured;
@@ -805,17 +805,17 @@ package Cake::Routes; {
                 push @splats,  $captures->[$_];
             }
         }
-        
+
         if (!@$splat) {
             @splats = @$captures;
         }
-        
+
         $match->{capture}  = \%captured;
         $match->{splat}    = \@splats;
         $c->{match}        = $match;
         return;
     }
-    
+
     sub inspect { $ROUTES }
 }
 
@@ -831,7 +831,7 @@ package Cake::JSON; {
     if (!$json_xs) {
         $json_pp = eval "use JSON; 1;";
     }
-    
+
     sub convert_to_json {
         my $perl_object = shift;
         if ($json_xs) {
@@ -853,7 +853,7 @@ package Cake::JSON; {
         }
         return $json;
     }
-    
+
     sub convert_to_perl {
         my $data = shift;
         if ($json_xs) {
@@ -868,25 +868,25 @@ package Cake::JSON; {
             $data =~ s/(["'])(?:\s?)+:/$1=>/g;
             $data =~ s/[^\\]([\@\$].*?\s*)/ \\$1/g;
         }
-        
+
         my $str = eval "$data";
         die "invalid json" if $@;
         return $str;
         #return _stringify($data);
     }
-    
+
     sub _stringify {
         my $hash = shift;
         my $type = shift || 'decode';
         my $newhash = {};
         my $array = 0;
         my $loop;
-        
+
         my $action = {
             decode => \&_decode_string,
             encode => \&_encode_string,
         };
-        
+
         if (!ref $hash){
             return $action->{$type}($hash);
         } elsif (ref $hash eq 'ARRAY') {
@@ -895,7 +895,7 @@ package Cake::JSON; {
         } else {
             $loop = $hash
         }
-        
+
         while (my ($key,$value) = each (%{$loop}) ) {
             if (ref $value eq 'HASH'){
                 $newhash->{$key} = _stringify($value,$type);
@@ -907,7 +907,7 @@ package Cake::JSON; {
         }
         return !$array ? $newhash : $newhash->{array};
     }
-    
+
     sub _encode_string {
         my $str = shift;
         return 0 if $str && $str =~ /^\d$/ && $str == 0;
@@ -917,7 +917,7 @@ package Cake::JSON; {
         map { $str =~ s/\Q$search[$_]/$replace[$_]/g } (0..$#search);
         return $str;
     }
-    
+
     sub _decode_string {
         my $str = shift;
         return '' if !$str;
@@ -947,7 +947,7 @@ package Cake::Util; {
 
         return time() + $time;
     }
-    
+
     sub uri_encode {
         return '' if !defined $_[0];
         $_[0] =~ s/([^A-Za-z0-9])/sprintf("%%%02X", ord($1))/seg;
@@ -1023,7 +1023,7 @@ Create application tree inside some folder
     $ perlcake -init App
 
 This will create the following app tree
-    
+
     + app.psgi
     + app.cgi
     + lib/App.pm
@@ -1032,18 +1032,18 @@ This will create the following app tree
     + static
 
 =head1 Route Methods
-    
+
     get '/' => sub {};
     post '/' => sub{};
     del '/' => sub {};
     put '/' => sub {};
     head '/' => sub {};
-    
+
     any '/' => sub {};
-    any => ['post', 'get'] => sub {}; 
+    any => ['post', 'get'] => sub {};
 
 =head1 Route Paths
-    
+
     + '/'                  # absolute direct path
     + '/something/:[name]' # capture second path as name
     + '/:(.*?)'            # regex captured as first splat
