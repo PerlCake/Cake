@@ -672,12 +672,19 @@ package Cake::Routes; {
 
         if (!defined $paths[0]){
             $paths[0] = '/';
-        } elsif ($paths[0] ne '' && ref $path ne 'Regexp') {
+        }
+
+        if ($paths[0] ne '' && ref $path ne 'Regexp') {
             my $class_path = $class;
             my $c_dir = lc($Cake::controllers_dir) . "::";
             $class_path =~ s/(.*)\Q$c_dir//ig;
             $class_path =~ s/::/\//g;
-            unshift @paths, ('', lc $class_path);
+            if (scalar @paths == 1 && $paths[0] eq '/'){
+                $paths[0] = '';
+                $paths[1] = lc $class_path;
+            } else {
+                unshift @paths, ('', lc $class_path);
+            }
         }
 
         if (ref $path eq 'Regexp' || $path =~ /:/g) {
