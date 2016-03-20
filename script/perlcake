@@ -67,9 +67,8 @@ sub createPackage {
     my $package = shift;
 
     my $plugin = $package . '::Plugins::Test';
-
     open my $fh, '>', $file;
-    print $fh qq~package $package
+    print $fh qq~package $package;
 use Cake;
 
 # global settings
