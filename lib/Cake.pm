@@ -257,11 +257,13 @@ sub put    { Cake::Routes::set('PUT'   , @_) }
 sub del    { Cake::Routes::set('DELETE', @_) }
 sub match  { Cake::Routes::match(@_)         }
 
+
 #== short cuts ================================================================
 sub app    {  shift->{app}           }
 sub req    {  shift->{request}       }
 sub res    {  shift->{response}      }
 sub env    {  shift->{request}->env  }
+
 
 #==============================================================================
 # bake the cake
@@ -274,6 +276,7 @@ sub bake {
     _reset_around_match();
     return $cake->_run();
 }
+
 
 #==============================================================================
 # bake the cake
@@ -293,6 +296,7 @@ sub _run {
     return $self->finalize();
 }
 
+
 sub finalize {
     my $c = shift;
     if (!$c->res->status) {
@@ -306,6 +310,7 @@ sub finalize {
     return $c->res->finalize();
 }
 
+
 #==============================================================================
 # Helpers
 #==============================================================================
@@ -315,11 +320,13 @@ sub to_json {
     return Cake::JSON::convert_to_json($data);
 }
 
+
 sub to_perl {
     my $self = shift;
     my $json_string = shift;
     return Cake::JSON::convert_to_perl($json_string);
 }
+
 
 sub splat {
     my $c = shift;
@@ -328,6 +335,7 @@ sub splat {
     }
     return $c->{match}->{splat};
 }
+
 
 sub capture {
     my $c = shift;
@@ -338,7 +346,49 @@ sub capture {
 }
 
 
+# prints routing map
 sub routes { Cake::Routes->inspect }
+
+#==============================================================================
+# json response
+#==============================================================================
+sub json {
+    my $self = shift;
+    my $hash = shift;
+
+    my $body = $self->to_json($hash);
+    $self->body($body);
+    return $self;
+}
+
+
+#==============================================================================
+# jsonp response
+#==============================================================================
+sub jsonp {
+    my $self  = shift;
+    my $param = shift; #callback param
+    my $hash  = shift;
+
+    # callback param not available
+    # use default 'callback'
+    if (ref $param eq 'HASH'){
+        $hash = $param;
+        $param = 'callback';
+    }
+
+    if (ref $hash ne 'HASH'){
+        die "jsonp accept hash only as body content";
+    }
+
+    my $body = $self->to_json($hash);
+    my $callback = $self->param($param) || 'callback';
+
+    $self->content_type('application/javascript');
+    $self->body($callback . '(' . $body . ');');
+    return $self;
+}
+
 
 #== Response methods ==========================================================
 sub dump           {  shift->res->body( Dumper $_[0]) }
@@ -355,6 +405,7 @@ sub dumper {
     print Dumper $_[0];
 }
 
+
 sub render {
     my $self = shift;
     my $string = shift;
@@ -364,6 +415,7 @@ sub render {
     my $body = $temp->($args);
     $self->body($body);
 }
+
 
 sub cookies {
     my $self = shift;
@@ -390,7 +442,8 @@ sub cookies {
 sub path    {  shift->req->path(@_)        }
 sub method  {  shift->req->method()        }
 sub param   {  shift->req->param(@_)       }
-sub params  {  shift->req->body_parameters }
+sub params  {  shift->req->parameters      }
+
 
 #==============================================================================
 # uri_for
@@ -399,6 +452,7 @@ sub uri_for {
     my $self = shift;
     return $self->_get_full_url(@_);
 }
+
 
 #==============================================================================
 # return current url with path & parameters
@@ -410,12 +464,14 @@ sub uri_with {
     return $self->_get_full_url(@_,$params);
 }
 
+
 #=============================================================================
 # get current full url
 #=============================================================================
 sub is_secure {
     return $_[0]->env->{'SSL_PROTOCOL'} ? 1 : 0;
 }
+
 
 sub uri_base {
     my $self = shift;
@@ -424,6 +480,7 @@ sub uri_base {
     $base .= '://'.$self->env->{HTTP_HOST};
     return $base;
 }
+
 
 sub _get_full_url {
     my $self = shift;
@@ -472,6 +529,7 @@ package Cake::Request; {
     use CGI;
     use CGI::Cookie;
     use Data::Dumper;
+
     sub new {
         my($class, $env) = @_;
         Carp::croak(q{$env is required})
@@ -509,6 +567,7 @@ package Cake::Request; {
     sub content_length   { $_[0]->env->{CONTENT_LENGTH} }
     sub content_type     { $_[0]->env->{CONTENT_TYPE} }
 
+
     sub cookies {
         my $self = shift;
         my $name = shift;
@@ -522,9 +581,20 @@ package Cake::Request; {
         return $self->{cookies};
     }
 
-    sub param { shift->cgi->param(@_) }
-    sub params { shift->cgi->Vars }
-    sub parameters { shift->cgi }
+
+    sub param {
+        my $req = shift;
+        if (@_){
+            return $req->cgi->param(@_) ;
+        }
+        return $req->cgi->param;
+    }
+
+
+    sub parameters {
+        my  %params = shift->cgi->Vars;
+        return \%params;
+    }
 }
 
 #==============================================================================
@@ -533,9 +603,11 @@ package Cake::Request; {
 package Cake::Response; {
     use strict;
     use warnings;
+    use Data::Dumper;
     use CGI (); use CGI::Cookie;
+
     sub new {
-        my ($class,$options) = @_;
+        my ($class, $options) = @_;
         return bless {
             content_type => 'text/html',
             status_code => 200,
@@ -544,6 +616,7 @@ package Cake::Response; {
             cgi => CGI->new
         }, $class;
     }
+
 
     sub body {
         my $self = shift;
@@ -557,11 +630,13 @@ package Cake::Response; {
         $self->{body} = $content;
     }
 
+
     sub cookies {
         my $self = shift;
         my $name = shift;
         return $self->{cookies};
     }
+
 
     sub redirect {
         my $self = shift;
@@ -571,6 +646,7 @@ package Cake::Response; {
         $self->{redirect} = \@_;
     }
 
+
     sub content_type {
         my $self = shift;
         if (@_){
@@ -579,9 +655,11 @@ package Cake::Response; {
         return $self->{content_type};
     }
 
+
     sub headers {
         my $self = shift;
     }
+
 
     sub header {
         my $self = shift;
@@ -589,13 +667,16 @@ package Cake::Response; {
         push @{$self->{headers}},@_;
     }
 
+
     sub status {
         my $self = shift;
         if (my $status = shift){
             $self->{status_code} = $status;
+            return $self;
         }
         return $self->{status_code};
     }
+
 
     sub finalize {
         my $self = shift;
@@ -609,8 +690,9 @@ package Cake::Response; {
             -cookie => $cookies,
             @{$self->{headers}}
         );
-        print $self->{body};
+        defined $self->{body} ? print $self->{body} : print '';
     }
+
 
     sub _get_content_length {
         my $self = shift;
@@ -619,6 +701,7 @@ package Cake::Response; {
         }
         return length $self->{body};
     }
+
 
     sub _finalize_cookies {
         my $self = shift;
@@ -640,6 +723,7 @@ package Cake::Response; {
         return \@cookies;
     }
 
+
     sub content_length {
         my $self = shift;
         if (@_){
@@ -648,6 +732,7 @@ package Cake::Response; {
         return $self->{content_length};
     }
 }
+
 
 #==============================================================================
 # Routes Package
@@ -801,6 +886,7 @@ package Cake::Routes; {
         return;
     }
 
+
     sub _match_regex {
         my ($c, $match, $captures, $splat) = @_;
         my %captured;
@@ -839,6 +925,7 @@ package Cake::JSON; {
         $json_pp = eval "use JSON; 1;";
     }
 
+
     sub convert_to_json {
         my $perl_object = shift;
         if ($json_xs) {
@@ -861,6 +948,7 @@ package Cake::JSON; {
         return $json;
     }
 
+
     sub convert_to_perl {
         my $data = shift;
         if ($json_xs) {
@@ -881,6 +969,7 @@ package Cake::JSON; {
         return $str;
         #return _stringify($data);
     }
+
 
     sub _stringify {
         my $hash = shift;
@@ -915,6 +1004,7 @@ package Cake::JSON; {
         return !$array ? $newhash : $newhash->{array};
     }
 
+
     sub _encode_string {
         my $str = shift;
         return 0 if $str && $str =~ /^\d$/ && $str == 0;
@@ -924,6 +1014,7 @@ package Cake::JSON; {
         map { $str =~ s/\Q$search[$_]/$replace[$_]/g } (0..$#search);
         return $str;
     }
+
 
     sub _decode_string {
         my $str = shift;
@@ -944,6 +1035,7 @@ package Cake::Util; {
              d => 60 * 60 * 24, M => 60 * 60 * 24 * 30,
              y => 60 * 60 * 24 * 30 * 12);
 
+
     sub toepoch {
         my $time = shift;
         if ($time =~ s/^\+//) {
@@ -955,11 +1047,13 @@ package Cake::Util; {
         return time() + $time;
     }
 
+
     sub uri_encode {
         return '' if !defined $_[0];
         $_[0] =~ s/([^A-Za-z0-9])/sprintf("%%%02X", ord($1))/seg;
         return $_[0];
     }
+
 
     sub uri_decode {
         $_[0] =~ tr/+/ /;
