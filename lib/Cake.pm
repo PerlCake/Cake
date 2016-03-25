@@ -391,14 +391,14 @@ sub jsonp {
 
 
 #== Response methods ==========================================================
-sub dump           {  shift->res->body( Dumper $_[0]) }
-sub redirect       {  shift->res->redirect(@_)        }
-sub body           {  shift->res->body(@_)            }
-sub header         {  shift->res->header(@_)          }
-sub headers        {  shift->res->headers(@_)         }
-sub status         {  shift->res->status(@_)          }
-sub content_type   {  shift->res->content_type(@_)    }
-sub content_length {  shift->res->content_length(@_)  }
+sub dump           {  my $c = shift; $c->res->body( Dumper $_[0]); return $c; }
+sub redirect       {  my $c = shift; $c->res->redirect(@_);        return $c; }
+sub body           {  my $c = shift; $c->res->body(@_);            return $c; }
+sub header         {  my $c = shift; $c->res->header(@_);          return $c; }
+sub headers        {  my $c = shift; $c->res->headers(@_);         return $c; }
+sub status         {  my $c = shift; $c->res->status(@_);          return $c; }
+sub content_type   {  my $c = shift; $c->res->content_type(@_);    return $c; }
+sub content_length {  my $c = shift; $c->res->content_length(@_);  return $c; }
 sub dumper {
     my $self = shift;
     return if $isCGI;
@@ -430,13 +430,14 @@ sub cookies {
             }
         }
         $self->res->cookies->{$name} = $value;
-        return;
+        return $self;
     } elsif ($name){
         my $cookies = $self->req->cookies() || {};
         return $cookies->{$name};
     }
     return $self->req->cookies();
 }
+
 
 #== Request methods ===========================================================
 sub path    {  shift->req->path(@_)        }
