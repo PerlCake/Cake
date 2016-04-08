@@ -137,8 +137,8 @@ sub model {
     my $settings = $_[0] || {};
     if ( !$models->{$model} ){
         eval "use $model; 1;" or croak $@;
-        if ( $model->can('new') ){
-            $models->{$model} = $model->new($self);
+        if ( $model->can('init') ){
+            $models->{$model} = $model->init($self);
         } else {
             $models->{$model} = bless {}, $model;
         }
@@ -345,7 +345,6 @@ sub capture {
     return $c->{match}->{capture};
 }
 
-
 # prints routing map
 sub routes { Cake::Routes->inspect }
 
@@ -355,7 +354,7 @@ sub routes { Cake::Routes->inspect }
 sub json {
     my $self = shift;
     my $hash = shift;
-
+    $self->content_type('application/json');
     my $body = $self->to_json($hash);
     $self->body($body);
     return $self;
@@ -1061,7 +1060,7 @@ package Cake::Util; {
         $_[0] =~ s/\%([A-Fa-f0-9]{2})/pack('C', hex($1))/seg;
         return $_[0];
     }
-}
+};
 
 1;
 
