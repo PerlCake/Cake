@@ -1,17 +1,18 @@
 package App::Model::Test;
 
-sub new {
+sub init {
 	my $class = shift;
 	my $c = shift;
 
 	return bless {
-		c => $c
+		c => $c,
+		msg => 'Model Testing'
 	}, $class;
 }
 
 sub returnSuccessTest {
 	my $self = shift;
-	return "Model Testing Success";
+	return $self->{msg} . " Success";
 }
 
 1;
