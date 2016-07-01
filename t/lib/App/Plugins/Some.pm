@@ -1,12 +1,12 @@
 package App::Plugins::Some;
 use Cake;
 
-sub new {
+sub register {
 	my $class= shift;
 	my $options = shift;
 	return bless {
-        options => $options
-    }, __PACKAGE__;
+		options => $options
+	}, __PACKAGE__;
 }
 
 sub _set {
@@ -23,8 +23,8 @@ sub _get {
 }
 
 register_function 'someplugin' => sub {
-    my $c = shift;
-    return $c->plugin(__PACKAGE__);
+	my $c = shift;
+	return $c->plugin(__PACKAGE__);
 };
 
 
