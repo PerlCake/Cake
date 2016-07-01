@@ -36,7 +36,7 @@ if ($isCGI) {
 }
 
 our @EXPORT = qw(loadControllers Settings Plugins
-                  bake get post del put any model around_match
+                  instance bake get post del put any model around_match
                   register_function);
 
 my $cake = bless {}, __PACKAGE__;
@@ -111,8 +111,8 @@ sub Plugins {
         }
 
         eval "use $plugin; 1;" or croak $@;
-        if ( $plugin->can('new') ){
-            $settings = $plugin->new($settings);
+        if ( $plugin->can('register') ){
+            $settings = $plugin->register($settings, $cake);
         }
         $plugins->{$plugin} = $settings;
     }
@@ -151,6 +151,9 @@ sub model {
 #==============================================================================
 sub register_function {
     my $name = shift;
+    if (ref $name) {
+        $name = shift;
+    }
     my $func = shift;
     if (Cake->can($name)){
         croak "function with '$name' name alread exists";
@@ -250,6 +253,11 @@ sub any {
     }
 }
 
+sub route  {
+    my ($self, $type, $path, $sub) = @_;
+    Cake::Routes::set(uc $type, $path, $sub);
+}
+
 sub get    { Cake::Routes::set('GET'   , @_) }
 sub post   { Cake::Routes::set('POST'  , @_) }
 sub head   { Cake::Routes::set('HEAD'  , @_) }
@@ -275,6 +283,16 @@ sub bake {
     $cake->{response} =  $HTTPResponse->new();
     _reset_around_match();
     return $cake->_run();
+}
+
+
+sub instance {
+    my $class = shift;
+    my $env = shift || \%ENV;
+    $cake->{request}  ||=  $HTTPRequest->new($env);
+    $cake->{response} ||=  $HTTPResponse->new();
+    _reset_around_match();
+    return $cake;
 }
 
 
@@ -305,6 +323,10 @@ sub finalize {
 
     if (!$c->res->content_type ){
         $c->res->content_type('text/html');
+    }
+
+    if (ref $c->res->{body} eq 'CODE'){
+        return $c->res->{body};
     }
 
     return $c->res->finalize();
@@ -381,7 +403,7 @@ sub jsonp {
     }
 
     my $body = $self->to_json($hash);
-    my $callback = $self->param($param) || 'callback';
+    my $callback = $param || 'callback';
 
     $self->content_type('application/javascript');
     $self->body($callback . '(' . $body . ');');
@@ -442,7 +464,17 @@ sub cookies {
 sub path    {  shift->req->path(@_)        }
 sub method  {  shift->req->method()        }
 sub param   {  shift->req->param(@_)       }
-sub params  {  shift->req->parameters      }
+sub params  {
+    my $self = shift;
+    my $content_type = $self->env->{CONTENT_TYPE};
+    if ($content_type && lc $content_type eq 'application/json') {
+        if (!$self->req->content){
+            return {};
+        }
+        return $self->to_perl($self->req->content) || {};
+    }
+    return $self->req->parameters
+}
 
 
 #==============================================================================
@@ -585,7 +617,7 @@ package Cake::Request; {
     sub param {
         my $req = shift;
         if (@_){
-            return $req->cgi->param(@_) ;
+            return $req->cgi->param(@_);
         }
         return $req->cgi->param;
     }
