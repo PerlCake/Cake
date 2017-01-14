@@ -230,7 +230,7 @@ sub loadControllers {
     for (@controllers){
         eval "require '$_'";
         if ($@) {
-            croak ("can't load controller $_");
+            croak ("can't load controller $_" . $@);
         }
     }
 }
@@ -466,14 +466,17 @@ sub method  {  shift->req->method()        }
 sub param   {  shift->req->param(@_)       }
 sub params  {
     my $self = shift;
+    my $params = $self->req->parameters;
     my $content_type = $self->env->{CONTENT_TYPE};
     if ($content_type && lc $content_type eq 'application/json') {
         if (!$self->req->content){
-            return {};
+            return $params;
         }
-        return $self->to_perl($self->req->content) || {};
+        my $json_params = $self->to_perl($self->req->content) || {};
+        my %newParam = ( %{ $params }, %{ $json_params });
+        return \%newParam;
     }
-    return $self->req->parameters
+    return $params;
 }
 
 
@@ -959,7 +962,7 @@ package Cake::JSON; {
 
 
     sub convert_to_json {
-        my $perl_object = shift;
+        my $perl_object = shift || {};
         if ($json_xs) {
             return JSON::XS::encode_json($perl_object);
         } elsif ($json_pp){
